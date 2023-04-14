@@ -4,12 +4,12 @@
   <img width="460" height="300" src="cottontail.png">
 </p>
 
-This program is a Telegram bot leveraging GPT to provide an AI assistant that can use multiple tools to reply to users in both single and group chat contexts.
+Cottontail is a Telegram bot that leverages GPT to provide an AI assistant that can use multiple tools to reply to users in both chat and group contexts and you can easily self-host on your machine.
 
 ## Features:
 
-1. Can assess and respond to user inputs in both single and group chat contexts.
-2. Utilizes multiple tools such as Google Search, WolframAlpha, Python REPL, and Bash commands.
+1. Can assess and respond to user inputs in both chat and group contexts.
+2. Utilizes multiple tools such as Google Search, WolframAlpha, Python REPL, and Bash.
 3. Supports human intervention for tasks that require human input.
 4. Conversations and context-awareness capabilities.
 
