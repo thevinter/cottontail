@@ -44,11 +44,19 @@ LANGUAGE = config.get("system", "language")
 IS_AWAITING = False
 ALLOWED_CHATS = Filters.chat(chat_id=[])
 
-search = GoogleSearchAPIWrapper()
-human = HumanInputRun()
-wolfram = WolframAlphaAPIWrapper()
-python = PythonREPL()
-bash = BashProcess()
+
+ENABLE_HUMAN = config.getboolean("tools", "enable_human")
+ENABLE_GOOGLE = config.getboolean("tools", "enable_google")
+ENABLE_WOLFRAM = config.getboolean("tools", "enable_wolfram")
+ENABLE_BASH = config.getboolean("tools", "enable_bash")
+ENABLE_PYTHON = config.getboolean("tools", "enable_python")
+
+search = GoogleSearchAPIWrapper() if ENABLE_GOOGLE else None
+human = HumanInputRun() if ENABLE_HUMAN else None
+wolfram = WolframAlphaAPIWrapper() if ENABLE_WOLFRAM else None
+python = PythonREPL() if ENABLE_PYTHON else None
+bash = BashProcess() if ENABLE_BASH else None
+
 
 tools = []
 
@@ -184,38 +192,43 @@ def input_func():
     return input_queue.get()
 
 
-human.input_func = input_func
+if config.getboolean("tools", "enable_human"):
+    human.input_func = input_func
 
 
 tool_list = [
     {
         "config_key": "enable_wolfram",
         "name": "Math",
-        "func": wolfram.run,
+        "func": wolfram.run if ENABLE_WOLFRAM else lambda _: "Not Implemented",
         "description": "Useful for when you need to answer questions that involve scientific or mathematical operations",
     },
     {
         "config_key": "enable_google",
         "name": "Search",
-        "func": search.run,
+        "func": search.run if ENABLE_GOOGLE else lambda _: "Not Implemented",
+
         "description": "Useful for when you need to answer questions about detailed current events. Don't use it on personal things",
     },
     {
         "config_key": "enable_bash",
         "name": "Bash",
-        "func": bash.run,
+        "func": bash.run if ENABLE_BASH else lambda _: "Not Implemented",
+
         "description": "Useful for when you need run bash commands",
     },
     {
         "config_key": "enable_python",
         "name": "Python",
-        "func": python.run,
+        "func": python.run if ENABLE_PYTHON else lambda _: "Not Implemented",
+
         "description": "Useful for when you need to execute python code in a REPL",
     },
     {
         "config_key": "enable_human",
         "name": "Human",
-        "func": human.run,
+        "func": human.run if ENABLE_HUMAN else lambda _: "Not Implemented",
+
         "description": "Useful for when you need to perform tasks that require human intervention.  Use this more than the other tools if the question is about something that only the user might know and you don't know in memory",
     },
 ]
@@ -309,11 +322,11 @@ def process_chat(update, allow):
     update.message.reply_text("Your username is not allowed to make changes")
 
 
-def enable_chat(update, _):
+def enable_group(update, _):
     process_chat(update, True)
 
 
-def disable_chat(update, _):
+def disable_group(update, _):
     process_chat(update, False)
 
 
@@ -328,6 +341,10 @@ def initial_setup():
 
     logger.info(
         f"Your bot is running in {'group' if IS_GROUP else 'chat'} mode.")
+
+    if config.getboolean("tools", "enable_python") or config.getboolean("tools", "enable_bash"):
+        logger.warn(
+            "WARNING: Bash or Python tools are enabled. This will allow the bot to run unverified code on your machine. Make sure the bot is proprly sandboxed.")
 
     for section in config.sections():
         for key, value in config.items(section):
@@ -344,8 +361,8 @@ def main():
     global dp
     dp = updater.dispatcher
 
-    dp.add_handler(CommandHandler("enable_chat", enable_chat))
-    dp.add_handler(CommandHandler("disable_chat", disable_chat))
+    dp.add_handler(CommandHandler("enable_group", enable_group))
+    dp.add_handler(CommandHandler("disable_group", disable_group))
 
     if (IS_GROUP):
         message_handler = MessageHandler(

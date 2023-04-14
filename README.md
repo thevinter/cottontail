@@ -44,7 +44,7 @@ Before you can use the AI Assistant Telegram Bot, you need to create a new bot o
 - Follow the instructions provided by the BotFather to create your new bot. It will ask you to choose a name and a username for your bot.
 - After you've successfully created your bot, the BotFather will provide you with your unique bot API key (also known as the bot token). Save this API key, as you will need it to run your AI Assistant Telegram Bot.
 
-## Usage:
+## How To Run:
 
 1. Ensure that you have Python 3.7 or later installed.
 2. Install the required dependencies.
@@ -55,8 +55,43 @@ Before you can use the AI Assistant Telegram Bot, you need to create a new bot o
 python3 main.py
 ```
 
-5. Interact with the bot on Telegram. The bot can assist you with various tasks by using different tools and can respond in both single and group chat contexts.
+## Usage
+
+The mode of interaction differs slightly whether the bot is running in chat or group mode. 
+
+### Chat mode
+Just start a new conversation with the bot. Every message sent in private chat to the bot will be parsed as input to the bot. To reply to a question just send another message.
+
+### Group mode
+- First you need to add the bot to a group
+- Then you need to enable the bot in that specific chat using the `/enable_group` command
+- The bot will react only to messages that start with @<botname>. If the "Human Feedback" tool is enabled and the bot asks a question then the reply needs to quote the message containing the question, every other message will be ignored
+- To disable the bot for the group use the `/disable_group` command
 
 ## Customization:
 
 You can customize the available tools and functionalities by modifying the configuration file .config according to your preferences.
+
+```
+botname -> The handle you have to your bot during cration
+language -> The language you want your replies to be in
+group -> If false then the bot will run in chat mode (see above)
+username -> Your handle on Telegram. If in chat mode then the bot will reply only if this matches the one of the one chatting with him. Only this username is allowed to use /enable_group and /disable_group
+information -> Some information you'd like the bot to know about you
+
+enable_wolfram -> Enables the integration with Wolfram Alpha for math questions
+enable_google -> Enables the integration with Google to allow the bot to search the web
+
+enable_human -> Allows the bot to aks questions back. This is still experimental and doesn't maintain the context of the chat so it might misbehave
+
+### DANGER ZONE ###
+### Enable these only if you know EXACTLY what you're doing
+enable_python -> Allows the bot to run UNCHECKED python code on the server machine
+enable_bash -> Allows the bot to run UNCHECKED bash code on the server machine
+### DANGER ZONE ###
+
+system_message -> A system message for the chat mode
+group_system_message -> A system message for the group mode
+model -> The GPT model you wish to use (gpt-3.5-turbo / gpt-4)
+temperature -> A value from 0 to 1 representing the randomness of the replies (The smaller it is, the more deterministic it is)
+```
