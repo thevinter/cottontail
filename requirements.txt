@@ -1,0 +1,4 @@
+langchain==0.0.139
+openai==0.27.2
+python-dotenv==1.0.0
+python-telegram-bot==20.2
