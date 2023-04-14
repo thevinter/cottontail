@@ -13,6 +13,8 @@ This program is a Telegram bot leveraging GPT to provide an AI assistant that ca
 3. Supports human intervention for tasks that require human input.
 4. Conversations and context-awareness capabilities.
 
+![Example](example.jpg)
+
 ## Dependencies:
 
 The program requires external Python libraries:
