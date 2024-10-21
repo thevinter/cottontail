@@ -1,25 +1,33 @@
 import configparser
 import logging
 import os
-import threading
+import asyncio
 from queue import Queue
 from typing import Any, Dict, List, Optional, Union
+
 import openai
 from dotenv import load_dotenv
 from langchain.agents import AgentType, Tool, initialize_agent
 from langchain.callbacks.base import BaseCallbackHandler, CallbackManager
 from langchain.chat_models import ChatOpenAI
 from langchain.memory import ConversationBufferMemory, ReadOnlySharedMemory
-from langchain.schema import (AgentAction, AgentFinish,
-                              LLMResult, SystemMessage)
+from langchain.schema import AgentAction, AgentFinish, LLMResult, SystemMessage
 from langchain.tools.human.tool import HumanInputRun
 from langchain.utilities import BashProcess, GoogleSearchAPIWrapper, PythonREPL
 from langchain.utilities.wolfram_alpha import WolframAlphaAPIWrapper
-from telegram import ChatAction
-from telegram.ext import Filters, MessageHandler, Updater, CommandHandler
+from telegram import Update
+from telegram.constants import ChatAction
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    level=logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,21 +37,13 @@ config.read('.config')
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-"""This is an ugly way to provide context access to bot calls"""
-upd = None
-ctx = None
-dp = None
-question = ""
-""""""
-
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 IS_GROUP = config.getboolean("system", "group")
 BOT_NAME = config.get("system", "botname")
 USERNAME = config.get("user", "username")
 LANGUAGE = config.get("system", "language")
 IS_AWAITING = False
-ALLOWED_CHATS = Filters.chat(chat_id=[])
-
+ALLOWED_CHATS = filters.Chat(chat_id=["253580370"])
 
 ENABLE_HUMAN = config.getboolean("tools", "enable_human")
 ENABLE_GOOGLE = config.getboolean("tools", "enable_google")
@@ -57,9 +57,10 @@ wolfram = WolframAlphaAPIWrapper() if ENABLE_WOLFRAM else None
 python = PythonREPL() if ENABLE_PYTHON else None
 bash = BashProcess() if ENABLE_BASH else None
 
-
 tools = []
 
+# Initialize the application variable globally
+application = None
 
 class MyCustomCallbackHandler(BaseCallbackHandler):
     """Custom CallbackHandler."""
@@ -155,45 +156,41 @@ class MyCustomCallbackHandler(BaseCallbackHandler):
 
 manager = CallbackManager([MyCustomCallbackHandler()])
 
+question = ""
 
-def ask_input(callback):
-    global dp
-    ctx.bot.send_message(chat_id=upd.effective_chat.id,
-                         text=question)
+async def ask_input(callback, chat_id):
+    await application.bot.send_message(chat_id=chat_id, text=question)
 
-    def handle_input(update, _):
+    async def handle_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         global IS_AWAITING
         user_input = update.message.text
 
         if not IS_GROUP or (update.message.reply_to_message.from_user.username == BOT_NAME):
             IS_AWAITING = False
-            remove_handler()
+            application.remove_handler(message_handler, 1)
             callback(user_input)
 
-    message_handler = MessageHandler(Filters.text & Filters.chat(
-        chat_id=upd.effective_chat.id), handle_input, run_async=True)
+    message_handler = MessageHandler(
+        filters.TEXT & filters.Chat(chat_id=chat_id),
+        handle_input
+    )
 
-    def remove_handler():
-        dp.remove_handler(message_handler)
+    application.add_handler(message_handler, 1)
 
-    dp.add_handler(message_handler)
-
-
-def input_func():
+async def input_func(chat_id):
     input_queue = Queue()
 
     def input_received(user_input):
         input_queue.put(user_input)
 
-    input_thread = threading.Thread(target=ask_input, args=(input_received,))
-    input_thread.start()
-    input_thread.join()
+    await ask_input(input_received, chat_id)
 
     return input_queue.get()
 
 
-if config.getboolean("tools", "enable_human"):
-    human.input_func = input_func
+if ENABLE_HUMAN:
+    # Ensure that the human tool uses the asynchronous input function
+    human.input_func = lambda: asyncio.run(input_func(current_chat_id))
 
 
 tool_list = [
@@ -207,29 +204,25 @@ tool_list = [
         "config_key": "enable_google",
         "name": "Search",
         "func": search.run if ENABLE_GOOGLE else lambda _: "Not Implemented",
-
         "description": "Useful for when you need to answer questions about detailed current events. Don't use it on personal things",
     },
     {
         "config_key": "enable_bash",
         "name": "Bash",
         "func": bash.run if ENABLE_BASH else lambda _: "Not Implemented",
-
         "description": "Useful for when you need run bash commands",
     },
     {
         "config_key": "enable_python",
         "name": "Python",
         "func": python.run if ENABLE_PYTHON else lambda _: "Not Implemented",
-
         "description": "Useful for when you need to execute python code in a REPL",
     },
     {
         "config_key": "enable_human",
         "name": "Human",
         "func": human.run if ENABLE_HUMAN else lambda _: "Not Implemented",
-
-        "description": "Useful for when you need to perform tasks that require human intervention.  Use this more than the other tools if the question is about something that only the user might know and you don't know in memory",
+        "description": "Useful for when you need to perform tasks that require human intervention. Use this more than the other tools if the question is about something that only the user might know and you don't know in memory",
     },
 ]
 
@@ -243,18 +236,16 @@ for tool in tool_list:
             ),
         )
 
-
 messages_array = [SystemMessage(
     content=config.get("assistant", "system_message"))]
 
 memory = ConversationBufferMemory(
     memory_key="chat_history", return_messages=True)
 
-
 memory.chat_memory.messages.append(SystemMessage(
-    content=f"{config.get('assistant', 'system_message' if not IS_GROUP else 'group_system_message')}\nAlways reply in f{LANGUAGE} unless otherwhise specified"))
+    content=f"{config.get('assistant', 'system_message' if not IS_GROUP else 'group_system_message')}\nAlways reply in {LANGUAGE} unless otherwise specified"))
 memory.chat_memory.add_user_message(
-    "You are an assistant. Your task is to be helpful. Your settings can be changed writing a message in square brackets [like this]. For example [End all of your messages with the current date]. Your system replies will be written inside square brackets as well. For example [System date after messages enabled]. Write [Ok] if you understood")
+    "You are an assistant. Your task is to be helpful. Your settings can be changed by writing a message in square brackets [like this]. For example [End all of your messages with the current date]. Your system replies will be written inside square brackets as well. For example [System date after messages enabled]. Write [Ok] if you understood")
 memory.chat_memory.add_ai_message("[Ok]")
 memory.chat_memory.add_user_message(
     f"Here might be some information about the person you're talking to: {config.get('user', 'information')}.\nReply [Ready] if you're ready to start")
@@ -262,50 +253,60 @@ memory.chat_memory.add_ai_message("[Ready]")
 
 readonlymemory = ReadOnlySharedMemory(memory=memory)
 
-llm = ChatOpenAI(model_name=config.get("assistant", "model"),
-                 temperature=config.get("assistant", "temperature"), callback_manager=manager)
+llm = ChatOpenAI(
+    model_name=config.get("assistant", "model"),
+    temperature=float(config.get("assistant", "temperature")),
+    callback_manager=manager
+)
 
 llm(messages_array)
 
 agent_chain = initialize_agent(
-    tools, llm, agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION, verbose=True, memory=memory, callback_manager=manager)
+    tools,
+    llm,
+    agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION,
+    verbose=True,
+    memory=memory,
+    callback_manager=manager
+)
 
-
-def chat(update, context):
-    global upd, ctx
-    upd = update
-    ctx = context
-
+async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info("Received a message.")
+    global IS_AWAITING, question
     if IS_AWAITING:
         return
 
     username = update.message.from_user.username
     chat_id = update.message.chat_id
 
-    context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+    # Set the current chat ID for input_func
+    global current_chat_id
+    current_chat_id = chat_id
+
+    await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
 
     gpt_prompt = update.message.text.split()
     if IS_GROUP:
         if len(gpt_prompt) == 1:
-            update.message.reply_text('Please write a message')
+            await update.message.reply_text('Please write a message')
             return
         gpt_prompt = " ".join(gpt_prompt[1:])
     else:
-        gpt_prompt = update.message
+        gpt_prompt = update.message.text
 
     formatted_prompt = f"{username}: {gpt_prompt}"
     reply = agent_chain.run(input=formatted_prompt)
-    update.message.reply_text(reply.strip())
+    await update.message.reply_text(reply.strip())
 
-
-def process_chat(update, allow):
+async def process_chat(update: Update, allow: bool):
     _username = update.message.from_user.username
     _chatid = update.message.chat_id
 
     if (_chatid in ALLOWED_CHATS.chat_ids) == allow:
         action = "already in" if allow else "not in"
-        update.message.reply_text(
-            f"Chat {_chatid} is {action} the list of allowed chats")
+        await update.message.reply_text(
+            f"Chat {_chatid} is {action} the list of allowed chats"
+        )
         return
 
     if _username == USERNAME:
@@ -315,67 +316,70 @@ def process_chat(update, allow):
             ALLOWED_CHATS.remove_chat_ids(_chatid)
 
         action = "added to" if allow else "removed from"
-        update.message.reply_text(
-            f"Chat {_chatid} has been {action} the list of allowed chats")
+        await update.message.reply_text(
+            f"Chat {_chatid} has been {action} the list of allowed chats"
+        )
         return
 
-    update.message.reply_text("Your username is not allowed to make changes")
+    await update.message.reply_text("Your username is not allowed to make changes")
 
+async def enable_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await process_chat(update, True)
 
-def enable_group(update, _):
-    process_chat(update, True)
-
-
-def disable_group(update, _):
-    process_chat(update, False)
-
+async def disable_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await process_chat(update, False)
 
 def initial_setup():
     if BOT_NAME == "" or BOT_NAME == "yourBotName":
-        logger.warn(
-            "The bot username might be incorrectly set. Please check the .config file")
+        logger.warning(
+            "The bot username might be incorrectly set. Please check the .config file"
+        )
 
     if USERNAME == "" or USERNAME == "yourTelegramHandle":
-        logger.warn(
-            "Your username might be incorrectly set. Please check the .config file")
+        logger.warning(
+            "Your username might be incorrectly set. Please check the .config file"
+        )
 
     logger.info(
-        f"Your bot is running in {'group' if IS_GROUP else 'chat'} mode.")
+        f"Your bot is running in {'group' if IS_GROUP else 'chat'} mode."
+    )
 
-    if config.getboolean("tools", "enable_python") or config.getboolean("tools", "enable_bash"):
-        logger.warn(
-            "WARNING: Bash or Python tools are enabled. This will allow the bot to run unverified code on your machine. Make sure the bot is proprly sandboxed.")
+    if ENABLE_PYTHON or ENABLE_BASH:
+        logger.warning(
+            "WARNING: Bash or Python tools are enabled. This will allow the bot to run unverified code on your machine. Make sure the bot is properly sandboxed."
+        )
 
     for section in config.sections():
         for key, value in config.items(section):
             if not value.strip():
-                logger.warn(
-                    f"Empty value found: Section '{section}' - Key '{key}'\nIs this intentional?")
+                logger.warning(
+                    f"Empty value found: Section '{section}' - Key '{key}'\nIs this intentional?"
+                )
 
+async def log_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Update received: {update}")
 
 def main():
+    global application
     initial_setup()
 
-    updater = Updater(TOKEN, use_context=True)
+    application = Application.builder().token(TOKEN).build()
 
-    global dp
-    dp = updater.dispatcher
+    application.add_handler(CommandHandler("enable_group", enable_group))
+    application.add_handler(CommandHandler("disable_group", disable_group))
 
-    dp.add_handler(CommandHandler("enable_group", enable_group))
-    dp.add_handler(CommandHandler("disable_group", disable_group))
-
-    if (IS_GROUP):
+    if IS_GROUP:
         message_handler = MessageHandler(
-            Filters.regex(f"^@{BOT_NAME}") & ALLOWED_CHATS, chat, run_async=True)
+            filters.Regex(f"^@{BOT_NAME}") & ALLOWED_CHATS, chat
+        )
     else:
         message_handler = MessageHandler(
-            Filters.text & Filters.chat(username=USERNAME), chat, run_async=True)
+            filters.TEXT & filters.Chat(username=USERNAME), chat
+        )
 
-    dp.add_handler(message_handler)
+    application.add_handler(message_handler)
 
-    updater.start_polling()
-    updater.idle()
-
+    application.run_polling()
 
 if __name__ == '__main__':
     main()
